@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# 외부 클론 라이브러리 (프로젝트에서 import하지 않음, 94MB)
+FinanceToolkit_daddypigpapa/
+
+# 로그
+*.log
+
+# 원자적 쓰기 임시 파일 잔여물
+*.tmp.*
+
+# 로컬 하네스/에디터 설정
+.claude/
+
+# OS
+Thumbs.db
+.DS_Store

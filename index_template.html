@@ -1,0 +1,1084 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>미국 ETF 옵션 분석 대시보드 (Serverless)</title>
+    <!-- Tailwind CSS Local (오프라인 동작용 로컬 서브셋, CDN 의존성 제거) -->
+    <link rel="stylesheet" href="./libs/tailwind-local.css">
+    <!-- Plotly.js Local Cache (인터넷 대기 지연 0ms 실현) -->
+    <script src="./libs/plotly.min.js"></script>
+    <style>
+        body {
+            background-color: #0f172a; /* Slate 900 */
+            color: #f1f5f9; /* Slate 100 */
+        }
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #1e293b;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #475569;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body class="font-sans antialiased min-h-screen">
+
+    <!-- Top Navigation Bar -->
+    <header class="bg-slate-800 border-b border-slate-700 py-4 px-6 shadow-lg">
+        <div class="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center gap-4">
+            <h1 class="text-2xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-indigo-400 flex items-center gap-2">
+                📊 미국 ETF 옵션 미결제약정 & 그릭스 분석 대시보드
+            </h1>
+            <span class="text-sm text-slate-400 bg-slate-900/60 px-3 py-1.5 rounded-full border border-slate-700/50">
+                100% Serverless 정적 모드 (0ms 지연)
+            </span>
+        </div>
+    </header>
+
+    <!-- Main Content Area -->
+    <main class="max-w-7xl mx-auto p-4 md:p-6 grid grid-cols-1 lg:grid-cols-4 gap-6">
+
+        <!-- Sidebar (Filter Panel) -->
+        <section class="bg-slate-800 border border-slate-700 rounded-xl p-5 shadow-md flex flex-col gap-5 lg:h-fit">
+            <div>
+                <h2 class="text-lg font-semibold text-slate-300 border-b border-slate-700 pb-2 mb-4 flex items-center gap-2">
+                    🛠️ 필터 및 제어판
+                </h2>
+            </div>
+
+            <!-- Ticker Select -->
+            <div class="flex flex-col gap-2">
+                <label for="ticker-select" class="text-sm font-medium text-slate-400">기초자산 ETF 선택</label>
+                <select id="ticker-select" class="bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer">
+                    <!-- Dynamic Loading -->
+                </select>
+            </div>
+
+            <!-- Expiry Type Filter -->
+            <div class="flex flex-col gap-2">
+                <label for="expiry-type-select" class="text-sm font-medium text-slate-400">만기 유형 필터</label>
+                <select id="expiry-type-select" class="bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer">
+                    <option value="all">전체 만기일 (All)</option>
+                    <option value="monthly">월물 (매월 3째주 금요일)</option>
+                    <option value="weekly">주물 (월·수·금)</option>
+                </select>
+            </div>
+
+            <!-- Expiration Date Select -->
+            <div class="flex flex-col gap-2">
+                <label for="expiry-select" class="text-sm font-medium text-slate-400">옵션 만기일 선택</label>
+                <select id="expiry-select" class="bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer">
+                    <!-- Dynamic Loading -->
+                </select>
+                <p id="no-expiry-warning" class="text-xs text-amber-400 hidden mt-1">⚠️ 일치하는 만기일이 없습니다.</p>
+            </div>
+
+            <!-- Indicator & Greek Selection -->
+            <div class="flex flex-col gap-2">
+                <label class="text-sm font-medium text-slate-400">분석 지표 및 그릭스 선택</label>
+                <div class="flex flex-col gap-2.5 bg-slate-900/60 p-3 rounded-lg border border-slate-700/50">
+                    <label class="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
+                        <input type="radio" name="greek-radio" value="gex" checked class="text-blue-500 focus:ring-0">
+                        <span class="font-semibold text-emerald-400">감마 노출 (GEX Profile)</span>
+                    </label>
+                    <label class="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
+                        <input type="radio" name="greek-radio" value="dex" class="text-blue-500 focus:ring-0">
+                        <span class="font-semibold text-cyan-400">델타 노출 (DEX Profile)</span>
+                    </label>
+                    <div class="border-t border-slate-800 my-1"></div>
+                    <label class="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
+                        <input type="radio" name="greek-radio" value="delta" class="text-blue-500 focus:ring-0">
+                        <span>델타 (Delta)</span>
+                    </label>
+                    <label class="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
+                        <input type="radio" name="greek-radio" value="gamma" class="text-blue-500 focus:ring-0">
+                        <span>감마 (Gamma)</span>
+                    </label>
+                    <label class="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
+                        <input type="radio" name="greek-radio" value="vega" class="text-blue-500 focus:ring-0">
+                        <span>베가 (Vega)</span>
+                    </label>
+                    <label class="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
+                        <input type="radio" name="greek-radio" value="theta" class="text-blue-500 focus:ring-0">
+                        <span>세타 (Theta)</span>
+                    </label>
+                </div>
+            </div>
+        </section>
+
+        <!-- Main Dashboard View -->
+        <section class="lg:col-span-3 flex flex-col gap-6">
+
+            <!-- Summary Cards -->
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div class="bg-slate-800 border border-slate-700 rounded-xl p-4 shadow-sm">
+                    <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider">기초자산 현재가</p>
+                    <h3 id="spot-price" class="text-lg md:text-xl font-bold text-white mt-1">- USD</h3>
+                </div>
+                <div class="bg-slate-800 border border-slate-700 rounded-xl p-4 shadow-sm">
+                    <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider">총 미결제약정 (OI)</p>
+                    <h3 id="total-oi" class="text-lg md:text-xl font-bold text-white mt-1">- 계약</h3>
+                </div>
+                <div class="bg-slate-800 border border-slate-700 rounded-xl p-4 shadow-sm">
+                    <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Put/Call Ratio (OI)</p>
+                    <h3 id="pcr-oi" class="text-lg md:text-xl font-bold text-white mt-1">-</h3>
+                </div>
+                <div class="bg-slate-800 border border-slate-700 rounded-xl p-4 shadow-sm">
+                    <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider">데이터 수집일</p>
+                    <h3 id="collected-date" class="text-lg md:text-xl font-bold text-white mt-1">-</h3>
+                </div>
+            </div>
+
+            <!-- Options Exposure Summary Cards -->
+            <div class="grid grid-cols-2 md:grid-cols-5 gap-4">
+                <div class="bg-slate-800 border border-slate-700 rounded-xl p-4 shadow-sm">
+                    <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider">넷 감마 노출 (Net GEX)</p>
+                    <h3 id="net-gex" class="text-sm md:text-base font-bold mt-1">-</h3>
+                </div>
+                <div class="bg-slate-800 border border-slate-700 rounded-xl p-4 shadow-sm">
+                    <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider">넷 델타 노출 (Net DEX)</p>
+                    <h3 id="net-dex" class="text-sm md:text-base font-bold mt-1">-</h3>
+                </div>
+                <div class="bg-slate-800 border border-slate-700 rounded-xl p-4 shadow-sm">
+                    <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider">감마 플립 가격</p>
+                    <h3 id="gamma-flip" class="text-sm md:text-base font-bold text-white mt-1">- USD</h3>
+                </div>
+                <div class="bg-slate-800 border border-slate-700 rounded-xl p-4 shadow-sm border-l-4 border-l-blue-500">
+                    <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider">콜 월 (Call Wall)</p>
+                    <h3 id="call-wall" class="text-sm md:text-base font-bold text-blue-400 mt-1">- USD</h3>
+                </div>
+                <div class="bg-slate-800 border border-slate-700 rounded-xl p-4 shadow-sm border-l-4 border-l-red-500">
+                    <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider">풋 월 (Put Wall)</p>
+                    <h3 id="put-wall" class="text-sm md:text-base font-bold text-red-400 mt-1">- USD</h3>
+                </div>
+            </div>
+
+            <!-- Plotly Interactive Chart Card -->
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-4 shadow-sm">
+                <!-- Y축 스케일 및 확대/축소 컨트롤러 -->
+                <div class="flex flex-wrap items-center justify-between gap-4 mb-4 bg-slate-900/60 p-3 rounded-lg border border-slate-700">
+                    <div class="flex items-center gap-2">
+                        <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Y축 가격 범위 설정</span>
+                        <div class="flex items-center gap-1.5">
+                            <input id="y-min-input" type="number" step="any" placeholder="Min" class="w-20 bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-white text-right focus:outline-none focus:ring-1 focus:ring-blue-500">
+                            <span class="text-slate-500 text-xs">~</span>
+                            <input id="y-max-input" type="number" step="any" placeholder="Max" class="w-20 bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-white text-right focus:outline-none focus:ring-1 focus:ring-blue-500">
+                            <button id="apply-range-btn" class="bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold px-2.5 py-1 rounded transition">적용</button>
+                            <button id="reset-range-btn" class="bg-slate-700 hover:bg-slate-600 text-white text-xs font-semibold px-2.5 py-1 rounded transition">초기화</button>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider">가격(Y) 확대/축소</span>
+                        <div class="flex items-center gap-1">
+                            <button id="zoom-in-btn" class="bg-slate-700 hover:bg-slate-600 text-white font-bold text-sm w-7 h-7 rounded flex items-center justify-center transition" title="가격축 확대 (현재가 중심)">＋</button>
+                            <button id="zoom-out-btn" class="bg-slate-700 hover:bg-slate-600 text-white font-bold text-sm w-7 h-7 rounded flex items-center justify-center transition" title="가격축 축소 (현재가 중심)">－</button>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider">날짜(X) 확대/축소</span>
+                        <div class="flex items-center gap-1">
+                            <button id="zoom-in-x-btn" class="bg-slate-700 hover:bg-slate-600 text-white font-bold text-sm w-7 h-7 rounded flex items-center justify-center transition" title="날짜축 확대 (최근일 중심)">＋</button>
+                            <button id="zoom-out-x-btn" class="bg-slate-700 hover:bg-slate-600 text-white font-bold text-sm w-7 h-7 rounded flex items-center justify-center transition" title="날짜축 축소 (최근일 중심)">－</button>
+                        </div>
+                        <span id="x-scale-display" class="text-xs font-bold text-blue-300 bg-slate-950 px-2 py-1 rounded border border-slate-700 text-center" style="min-width:56px;display:inline-block;" title="현재 차트에 보이는 일봉 수">-</span>
+                    </div>
+                </div>
+                <div id="chart-container" class="w-full" style="height: 550px;">
+                    <!-- Plotly Chart Target -->
+                    <div id="plotly-chart" class="w-full h-full"></div>
+                </div>
+                <p class="text-xs text-slate-400 text-center mt-2 italic">
+                    *차트 내의 노란색 가로 실선은 기초자산의 현재가(Spot Price)를 나타내며, 기타 점선들은 주요 감마 지표 레벨들을 표시합니다.
+                </p>
+            </div>
+
+            <!-- Raw Data Details Table -->
+            <div class="bg-slate-800 border border-slate-700 rounded-xl shadow-sm overflow-hidden">
+                <button id="toggle-table-btn" class="w-full text-left px-5 py-4 font-semibold text-slate-300 bg-slate-700/50 hover:bg-slate-700 transition flex justify-between items-center focus:outline-none">
+                    <span>📄 수집된 원본 데이터 상세 테이블 보기</span>
+                    <span id="table-arrow" class="transition-transform duration-200">▼</span>
+                </button>
+                
+                <div id="table-container" class="hidden border-t border-slate-700 overflow-x-auto max-h-96">
+                    <table class="w-full text-left border-collapse text-sm">
+                        <thead class="bg-slate-900 text-slate-400 sticky top-0 uppercase text-xs font-semibold">
+                            <tr>
+                                <th class="py-3 px-4">옵션 기호</th>
+                                <th class="py-3 px-4">구분</th>
+                                <th class="py-3 px-4 text-right">행사가</th>
+                                <th class="py-3 px-4 text-right">최근가</th>
+                                <th class="py-3 px-4 text-right">매수호가</th>
+                                <th class="py-3 px-4 text-right">매도호가</th>
+                                <th class="py-3 px-4 text-right">거래량</th>
+                                <th class="py-3 px-4 text-right">미결제약정</th>
+                                <th class="py-3 px-4 text-right">IV</th>
+                                <th class="py-3 px-4 text-right">델타</th>
+                                <th class="py-3 px-4 text-right">감마</th>
+                                <th class="py-3 px-4 text-right">베가</th>
+                                <th class="py-3 px-4 text-right">세타</th>
+                                <th class="py-3 px-4 text-right text-emerald-400">GEX (감마노출)</th>
+                                <th class="py-3 px-4 text-right text-cyan-400">DEX (델타노출)</th>
+                            </tr>
+                        </thead>
+                        <tbody id="table-body" class="divide-y divide-slate-700/50 bg-slate-800 text-slate-300">
+                            <!-- Dynamic Table Rows -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+        </section>
+
+    </main>
+
+    <!-- 인라인 요약 메타데이터 (options 제외, 경량) -->
+    <script id="data-payload">
+        window.optionsMeta = /*DATA_PAYLOAD_PLACEHOLDER*/;
+    </script>
+
+    <!-- JavaScript logic -->
+    <script>
+        // 글로벌 상태 변수
+        let rawExpirations = [];
+        let optionData = {};
+        let customYRange = null;
+        const _loadedTickers = new Set(); // 이미 로드된 옵션 JS 파일 추적
+
+        // DOM Elements
+        const tickerSelect = document.getElementById('ticker-select');
+        const expiryTypeSelect = document.getElementById('expiry-type-select');
+        const expirySelect = document.getElementById('expiry-select');
+        const noExpiryWarning = document.getElementById('no-expiry-warning');
+        const toggleTableBtn = document.getElementById('toggle-table-btn');
+        const tableContainer = document.getElementById('table-container');
+        const tableArrow = document.getElementById('table-arrow');
+        const tableBody = document.getElementById('table-body');
+        
+        // Scale / Zoom Elements
+        const yMinInput = document.getElementById('y-min-input');
+        const yMaxInput = document.getElementById('y-max-input');
+        const applyRangeBtn = document.getElementById('apply-range-btn');
+        const resetRangeBtn = document.getElementById('reset-range-btn');
+        const zoomInBtn = document.getElementById('zoom-in-btn');
+        const zoomOutBtn = document.getElementById('zoom-out-btn');
+        const zoomInXBtn = document.getElementById('zoom-in-x-btn');
+        const zoomOutXBtn = document.getElementById('zoom-out-x-btn');
+
+        // Metrics Elements
+        const spotPriceEl = document.getElementById('spot-price');
+        const totalOiEl = document.getElementById('total-oi');
+        const pcrOiEl = document.getElementById('pcr-oi');
+        const collectedDateEl = document.getElementById('collected-date');
+        const netGexEl = document.getElementById('net-gex');
+        const netDexEl = document.getElementById('net-dex');
+        const gammaFlipEl = document.getElementById('gamma-flip');
+        const callWallEl = document.getElementById('call-wall');
+        const putWallEl = document.getElementById('put-wall');
+
+        // 1. 초기 로드
+        document.addEventListener('DOMContentLoaded', () => {
+            initApp();
+            
+            // 이벤트 바인딩
+            tickerSelect.addEventListener('change', onTickerChange);
+            expiryTypeSelect.addEventListener('change', onExpiryFilterChange);
+            expirySelect.addEventListener('change', onExpiryChange);
+            
+            // Y축 범위 및 Zoom 이벤트 바인딩
+            applyRangeBtn.addEventListener('click', () => {
+                const minVal = parseFloat(yMinInput.value);
+                const maxVal = parseFloat(yMaxInput.value);
+                if (!isNaN(minVal) && !isNaN(maxVal) && minVal < maxVal) {
+                    customYRange = [minVal, maxVal];
+                    Plotly.relayout('plotly-chart', { 'yaxis.range': customYRange });
+                }
+            });
+
+            resetRangeBtn.addEventListener('click', () => {
+                customYRange = null;
+                Plotly.relayout('plotly-chart', { 'yaxis.range': null }).then(() => {
+                    updateRangeInputs();
+                });
+            });
+
+            // 가격(Y)축 확대/축소 — 항상 현재가(Spot)를 중심에 고정
+            zoomInBtn.addEventListener('click', () => zoomYAxis(0.85));
+            zoomOutBtn.addEventListener('click', () => zoomYAxis(1.15));
+
+            // 날짜(X)축 확대/축소 — 최근일(우측 끝)을 기준으로 확대
+            zoomInXBtn.addEventListener('click', () => zoomXAxis(0.85));
+            zoomOutXBtn.addEventListener('click', () => zoomXAxis(1.15));
+            
+            // 그릭스 라디오 버튼 이벤트 바인딩
+            document.querySelectorAll('input[name="greek-radio"]').forEach(radio => {
+                radio.addEventListener('change', () => {
+                    if (optionData && optionData.options) {
+                        drawChart(optionData, radio.value);
+                    }
+                });
+            });
+
+            // 테이블 토글
+            toggleTableBtn.addEventListener('click', () => {
+                tableContainer.classList.toggle('hidden');
+                tableArrow.classList.toggle('rotate-180');
+            });
+        });
+
+        function initApp() {
+            const tickers = Object.keys(window.optionsMeta);
+
+            if (tickers && tickers.length > 0) {
+                tickerSelect.innerHTML = tickers.map(ticker =>
+                    `<option value="${ticker}">${ticker}</option>`
+                ).join('');
+                onTickerChange();
+            } else {
+                tickerSelect.innerHTML = `<option value="">데이터 없음 (usa_etf_option_collect.py 실행 필요)</option>`;
+            }
+        }
+
+        function setLoadingState(isLoading) {
+            const chartContainer = document.getElementById('chart-container');
+            let overlay = document.getElementById('loading-overlay');
+            if (isLoading) {
+                if (!overlay) {
+                    overlay = document.createElement('div');
+                    overlay.id = 'loading-overlay';
+                    overlay.style.cssText = 'position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(15,23,42,0.8);z-index:10;border-radius:0.5rem;';
+                    overlay.innerHTML = '<span style="color:#94a3b8;font-size:0.875rem;">⏳ 옵션 데이터 로딩 중...</span>';
+                    chartContainer.style.position = 'relative';
+                    chartContainer.appendChild(overlay);
+                }
+            } else {
+                if (overlay) overlay.remove();
+            }
+        }
+
+        function loadTickerOptions(ticker, callback) {
+            // 이미 로드됐으면 즉시 콜백
+            if (_loadedTickers.has(ticker)) {
+                callback();
+                return;
+            }
+            setLoadingState(true);
+            const script = document.createElement('script');
+            // HTML 파일과 같은 디렉토리의 data/ 폴더에서 로드
+            script.src = `./data/${ticker}_options.js`;
+            script.onload = () => {
+                _loadedTickers.add(ticker);
+                setLoadingState(false);
+                callback();
+            };
+            script.onerror = () => {
+                setLoadingState(false);
+                console.error(`[${ticker}] 옵션 데이터 파일 로드 실패: data/${ticker}_options.js`);
+            };
+            document.head.appendChild(script);
+        }
+
+        function onTickerChange() {
+            const selectedTicker = tickerSelect.value;
+            if (!selectedTicker) return;
+
+            const tickerMeta = window.optionsMeta[selectedTicker];
+            if (!tickerMeta) return;
+
+            rawExpirations = tickerMeta.expirations || [];
+
+            loadTickerOptions(selectedTicker, () => {
+                onExpiryFilterChange();
+            });
+        }
+
+        function getDteString(expiryDateStr, collectedDateStr) {
+            const expParts = expiryDateStr.split('-');
+            const collParts = collectedDateStr.split('-');
+            const expDate = new Date(Date.UTC(Number(expParts[0]), Number(expParts[1]) - 1, Number(expParts[2])));
+            const collDate = new Date(Date.UTC(Number(collParts[0]), Number(collParts[1]) - 1, Number(collParts[2])));
+            const diffTime = expDate - collDate;
+            const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+            return diffDays > 0 ? `${diffDays}일` : '오늘 만기';
+        }
+
+        function onExpiryFilterChange() {
+            const selectedTicker = tickerSelect.value;
+            const tickerMeta = window.optionsMeta[selectedTicker];
+            const type = expiryTypeSelect.value;
+            const filtered = filterExpirations(rawExpirations, type);
+
+            if (filtered.length > 0 && tickerMeta) {
+                noExpiryWarning.classList.add('hidden');
+                expirySelect.disabled = false;
+                expirySelect.innerHTML = filtered.map(exp => {
+                    const dte = getDteString(exp, tickerMeta.collected_date);
+                    return `<option value="${exp}">${exp} (DTE: ${dte})</option>`;
+                }).join('');
+                onExpiryChange();
+            } else {
+                noExpiryWarning.classList.remove('hidden');
+                expirySelect.disabled = true;
+                expirySelect.innerHTML = `<option value="">없음</option>`;
+                clearMetrics();
+                Plotly.purge('plotly-chart');
+                tableBody.innerHTML = '';
+            }
+        }
+
+        function filterExpirations(dates, type) {
+            if (type === 'all') return dates;
+            
+            return dates.filter(dateStr => {
+                const parts = dateStr.split('-');
+                const d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+                const dow = d.getDay();          // 일=0 ... 금=5 ... 토=6
+                const isFriday = dow === 5;       // 금요일 = 5
+                const day = d.getDate();
+
+                if (type === 'monthly') {
+                    // 월물: 매월 3째주 금요일
+                    return isFriday && day >= 15 && day <= 21;
+                } else if (type === 'weekly') {
+                    // 주물: SPY 주간옵션 만기 = 월(1)·수(3)·금(5)
+                    return dow === 1 || dow === 3 || dow === 5;
+                }
+                return true;
+            });
+        }
+
+        function onExpiryChange() {
+            const selectedTicker = tickerSelect.value;
+            const selectedExpiry = expirySelect.value;
+            if (!selectedTicker || !selectedExpiry) return;
+
+            customYRange = null;
+
+            const tickerMeta = window.optionsMeta[selectedTicker];
+            if (!tickerMeta) return;
+
+            // 동적 로드된 분리 JS 파일에서 옵션 데이터 참조
+            const etfOptions = window[`_etfOptions_${selectedTicker}`] || {};
+            const options = etfOptions[selectedExpiry] || [];
+            
+            optionData = {
+                underlying_ticker: selectedTicker,
+                expiry: selectedExpiry,
+                collected_date: tickerMeta.collected_date,
+                spot_price: tickerMeta.spot_price,
+                total_oi: tickerMeta.total_oi,
+                pcr_oi: tickerMeta.pcr_oi,
+                net_gex: tickerMeta.net_gex,
+                net_dex: tickerMeta.net_dex,
+                call_wall: tickerMeta.call_wall,
+                put_wall: tickerMeta.put_wall,
+                gamma_flip_price: tickerMeta.gamma_flip_price,
+                options: options,
+                stock_history: tickerMeta.stock_history || []
+            };
+
+            // 메트릭 업데이트
+            updateMetrics(optionData);
+            
+            // 선택된 그릭스 획득 후 차트 그리기
+            const selectedGreek = document.querySelector('input[name="greek-radio"]:checked').value;
+            drawChart(optionData, selectedGreek);
+            
+            // 데이터 테이블 채우기
+            fillDataTable(optionData.options);
+        }
+
+        function formatDollarValue(val) {
+            if (val === undefined || val === null || isNaN(val)) return '-';
+            const isNegative = val < 0;
+            const absVal = Math.abs(val);
+            let formatted = '';
+            if (absVal >= 1e9) {
+                formatted = `$${(absVal / 1e9).toFixed(2)}B`;
+            } else if (absVal >= 1e6) {
+                formatted = `$${(absVal / 1e6).toFixed(2)}M`;
+            } else if (absVal >= 1e3) {
+                formatted = `$${(absVal / 1e3).toFixed(2)}K`;
+            } else {
+                formatted = `$${absVal.toFixed(2)}`;
+            }
+            return isNegative ? `-${formatted}` : formatted;
+        }
+
+        function updateRangeInputs() {
+            const gd = document.getElementById('plotly-chart');
+            const yMinInput = document.getElementById('y-min-input');
+            const yMaxInput = document.getElementById('y-max-input');
+            if (gd && gd.layout && gd.layout.yaxis && gd.layout.yaxis.range && yMinInput && yMaxInput) {
+                const range = gd.layout.yaxis.range;
+                yMinInput.value = parseFloat(range[0]).toFixed(2);
+                yMaxInput.value = parseFloat(range[1]).toFixed(2);
+            }
+        }
+
+        // 가격(Y)축 확대/축소 — 현재가(Spot)를 항상 중심에 고정
+        function zoomYAxis(factor) {
+            const gd = document.getElementById('plotly-chart');
+            if (!gd || !gd.layout || !gd.layout.yaxis || !gd.layout.yaxis.range) return;
+            const range = gd.layout.yaxis.range;
+            const halfSpan = ((range[1] - range[0]) / 2) * factor;
+            // 현재가가 있으면 그 값을 중심으로, 없으면 기존 중앙값 사용
+            const center = (optionData && typeof optionData.spot_price === 'number')
+                ? optionData.spot_price
+                : (range[0] + range[1]) / 2;
+            customYRange = [center - halfSpan, center + halfSpan];
+            Plotly.relayout('plotly-chart', { 'yaxis.range': customYRange });
+            yMinInput.value = customYRange[0].toFixed(2);
+            yMaxInput.value = customYRange[1].toFixed(2);
+        }
+
+        // 날짜(X)축 확대/축소 — 최근일(우측 끝)을 기준으로 확대/축소
+        function zoomXAxis(factor) {
+            const gd = document.getElementById('plotly-chart');
+            if (!gd || !gd._fullLayout || !gd._fullLayout.xaxis) return;
+            const xa = gd._fullLayout.xaxis;
+            const srcRange = (gd.layout.xaxis && gd.layout.xaxis.range) ? gd.layout.xaxis.range : xa.range;
+            if (!srcRange) return;
+
+            // date/category 축 모두 대응: 숫자로 변환 후 계산
+            const toNum = (v) => (typeof v === 'number') ? v
+                : (xa.type === 'date' ? new Date(v).getTime() : Number(v));
+            const r0 = toNum(srcRange[0]);
+            const r1 = toNum(srcRange[1]);
+            if (!isFinite(r0) || !isFinite(r1)) return;
+
+            const anchor = r1;                       // 최근일(우측 끝) 고정
+            const newSpan = (r1 - r0) * factor;
+            const newR0 = anchor - newSpan;
+            Plotly.relayout('plotly-chart', { 'xaxis.range': [newR0, anchor] });
+        }
+
+        function updateMetrics(data) {
+            spotPriceEl.innerText = `$${data.spot_price.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})} USD`;
+            totalOiEl.innerText = `${data.total_oi.toLocaleString()} 계약`;
+            pcrOiEl.innerText = data.pcr_oi;
+            collectedDateEl.innerText = data.collected_date;
+
+            // GEX / DEX formatting & colors
+            netGexEl.innerText = formatDollarValue(data.net_gex);
+            if (data.net_gex >= 0) {
+                netGexEl.className = "text-sm md:text-base font-bold mt-1 text-emerald-400";
+            } else {
+                netGexEl.className = "text-sm md:text-base font-bold mt-1 text-rose-400";
+            }
+
+            netDexEl.innerText = formatDollarValue(data.net_dex);
+            if (data.net_dex >= 0) {
+                netDexEl.className = "text-sm md:text-base font-bold mt-1 text-emerald-400";
+            } else {
+                netDexEl.className = "text-sm md:text-base font-bold mt-1 text-rose-400";
+            }
+
+            gammaFlipEl.innerText = data.gamma_flip_price ? `$${data.gamma_flip_price.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})} USD` : '- USD';
+            callWallEl.innerText = data.call_wall ? `$${data.call_wall.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})} USD` : '- USD';
+            putWallEl.innerText = data.put_wall ? `$${data.put_wall.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})} USD` : '- USD';
+        }
+
+        function clearMetrics() {
+            spotPriceEl.innerText = '- USD';
+            totalOiEl.innerText = '- 계약';
+            pcrOiEl.innerText = '-';
+            collectedDateEl.innerText = '-';
+
+            netGexEl.innerText = '-';
+            netGexEl.className = "text-sm md:text-base font-bold mt-1 text-white";
+            netDexEl.innerText = '-';
+            netDexEl.className = "text-sm md:text-base font-bold mt-1 text-white";
+            gammaFlipEl.innerText = '- USD';
+            callWallEl.innerText = '- USD';
+            putWallEl.innerText = '- USD';
+        }
+
+        function drawChart(data, greek) {
+            const options = data.options;
+            const history = data.stock_history || [];
+
+            // 1. 주가 캔들스틱 데이터 배열 구성
+            const times = [];
+            const opens = [];
+            const highs = [];
+            const lows = [];
+            const closes = [];
+
+            history.forEach(h => {
+                times.push(h.time);
+                opens.push(h.open);
+                highs.push(h.high);
+                lows.push(h.low);
+                closes.push(h.close);
+            });
+
+            const candleTrace = {
+                x: times,
+                open: opens,
+                high: highs,
+                low: lows,
+                close: closes,
+                type: 'candlestick',
+                xaxis: 'x',
+                yaxis: 'y',
+                name: '주가 일봉 (Daily)',
+                increasing: { line: { color: '#ef4444' } }, // 상승 빨강
+                decreasing: { line: { color: '#3b82f6' } }  // 하락 파랑
+            };
+
+            // 2. 옵션 가로 매물대 데이터 배열 구성 (압축 키 디코딩)
+            const callStrikes = [];
+            const callXVal = [];
+            const callGreekIntensity = [];
+            const callCustomData = [];
+
+            const putStrikes = [];
+            const putXVal = [];
+            const putGreekIntensity = [];
+            const putCustomData = [];
+
+            // 그릭스 라디오 밸류와 JSON 압축 키 간의 매핑 정의
+            const greekKeyMap = {
+                delta: 'd',
+                gamma: 'g',
+                vega: 'v',
+                theta: 'th'
+            };
+            const greekKey = greekKeyMap[greek] || 'd';
+
+            options.forEach(opt => {
+                const greekVal = opt[greekKey] !== null ? Math.abs(opt[greekKey]) : 0;
+                const tooltipData = [
+                    opt.s,                  // 0: option_symbol
+                    opt.t.toUpperCase(),    // 1: option_type
+                    opt.o,                  // 2: open_interest
+                    opt.lp,                 // 3: last_price
+                    opt.iv,                 // 4: implied_volatility
+                    opt.d,                  // 5: delta
+                    opt.g,                  // 6: gamma
+                    opt.v,                  // 7: vega
+                    opt.th,                 // 8: theta
+                    opt.gex,                // 9: gex
+                    opt.dex                 // 10: dex
+                ];
+
+                let xVal = opt.o; // 기본값 Open Interest
+                if (greek === 'gex') {
+                    xVal = opt.gex;
+                } else if (greek === 'dex') {
+                    xVal = opt.dex;
+                }
+
+                if (opt.t === 'call') {
+                    callStrikes.push(opt.k);
+                    callXVal.push(xVal);
+                    callGreekIntensity.push(greekVal);
+                    callCustomData.push(tooltipData);
+                } else {
+                    putStrikes.push(opt.k);
+                    putXVal.push(xVal);
+                    putGreekIntensity.push(greekVal);
+                    putCustomData.push(tooltipData);
+                }
+            });
+
+            // GEX / DEX 또는 일반 Greeks에 따른 색상 및 호버 템플릿 처리
+            let callMarker = {};
+            let putMarker = {};
+            let callHover = "";
+            let putHover = "";
+            let xAxis2Title = "";
+
+            if (greek === 'gex') {
+                callMarker = { color: 'rgba(239, 68, 68, 0.6)' };  // Call = Red
+                putMarker = { color: 'rgba(16, 185, 129, 0.6)' };  // Put = Green
+                xAxis2Title = '넷 감마 노출액 (Gamma Exposure, USD)';
+
+                callHover = "<b>콜옵션 감마 노출 (GEX)</b><br>" +
+                            "옵션코드: %{customdata[0]}<br>" +
+                            "행사가: %{y} USD<br>" +
+                            "감마 노출액: %{x:$,.0f} USD<br>" +
+                            "미결제약정: %{customdata[2]:,} 계약<br>" +
+                            "IV: %{customdata[4]:.2%}<br>" +
+                            "<extra>" +
+                            "Delta: %{customdata[5]:.4f}<br>" +
+                            "Gamma: %{customdata[6]:.6f}" +
+                            "</extra>";
+
+                putHover = "<b>풋옵션 감마 노출 (GEX)</b><br>" +
+                           "옵션코드: %{customdata[0]}<br>" +
+                           "행사가: %{y} USD<br>" +
+                           "감마 노출액: %{x:$,.0f} USD<br>" +
+                           "미결제약정: %{customdata[2]:,} 계약<br>" +
+                           "IV: %{customdata[4]:.2%}<br>" +
+                           "<extra>" +
+                           "Delta: %{customdata[5]:.4f}<br>" +
+                           "Gamma: %{customdata[6]:.6f}" +
+                           "</extra>";
+            } else if (greek === 'dex') {
+                callMarker = { color: 'rgba(239, 68, 68, 0.6)' };  // Call = Red
+                putMarker = { color: 'rgba(16, 185, 129, 0.6)' };  // Put = Green
+                xAxis2Title = '넷 델타 노출액 (Delta Exposure, USD)';
+
+                callHover = "<b>콜옵션 델타 노출 (DEX)</b><br>" +
+                            "옵션코드: %{customdata[0]}<br>" +
+                            "행사가: %{y} USD<br>" +
+                            "델타 노출액: %{x:$,.0f} USD<br>" +
+                            "미결제약정: %{customdata[2]:,} 계약<br>" +
+                            "IV: %{customdata[4]:.2%}<br>" +
+                            "<extra>" +
+                            "Delta: %{customdata[5]:.4f}" +
+                            "</extra>";
+
+                putHover = "<b>풋옵션 델타 노출 (DEX)</b><br>" +
+                           "옵션코드: %{customdata[0]}<br>" +
+                           "행사가: %{y} USD<br>" +
+                           "델타 노출액: %{x:$,.0f} USD<br>" +
+                           "미결제약정: %{customdata[2]:,} 계약<br>" +
+                           "IV: %{customdata[4]:.2%}<br>" +
+                           "<extra>" +
+                           "Delta: %{customdata[5]:.4f}" +
+                           "</extra>";
+            } else {
+                callMarker = {
+                    color: callGreekIntensity,
+                    colorscale: 'Reds',   // Call = 붉은 계열
+                    showscale: false
+                };
+                putMarker = {
+                    color: putGreekIntensity,
+                    colorscale: 'Greens', // Put = 녹색 계열
+                    showscale: false
+                };
+                xAxis2Title = '미결제약정 (Open Interest, Contracts)';
+
+                callHover = "<b>콜옵션 매물벽</b><br>" +
+                            "옵션코드: %{customdata[0]}<br>" +
+                            "행사가: %{y} USD<br>" +
+                            "미결제약정: %{x:,} 계약<br>" +
+                            "IV: %{customdata[4]:.2%}<br>" +
+                            "<extra>" +
+                            "Delta: %{customdata[5]:.4f}<br>" +
+                            "Gamma: %{customdata[6]:.6f}<br>" +
+                            "Vega: %{customdata[7]:.4f}<br>" +
+                            "Theta: %{customdata[8]:.4f}" +
+                            "</extra>";
+
+                putHover = "<b>풋옵션 매물벽</b><br>" +
+                           "옵션코드: %{customdata[0]}<br>" +
+                           "행사가: %{y} USD<br>" +
+                           "미결제약정: %{x:,} 계약<br>" +
+                           "IV: %{customdata[4]:.2%}<br>" +
+                           "<extra>" +
+                           "Delta: %{customdata[5]:.4f}<br>" +
+                           "Gamma: %{customdata[6]:.6f}<br>" +
+                           "Vega: %{customdata[7]:.4f}<br>" +
+                           "Theta: %{customdata[8]:.4f}" +
+                           "</extra>";
+            }
+
+            const callTrace = {
+                x: callXVal,
+                y: callStrikes,
+                xaxis: 'x2',
+                yaxis: 'y',
+                type: 'bar',
+                orientation: 'h',
+                name: greek === 'gex' ? 'Call GEX' : (greek === 'dex' ? 'Call DEX' : 'Call OI 매물대'),
+                opacity: 0.45,
+                marker: callMarker,
+                customdata: callCustomData,
+                hovertemplate: callHover
+            };
+
+            const putTrace = {
+                x: putXVal,
+                y: putStrikes,
+                xaxis: 'x2',
+                yaxis: 'y',
+                type: 'bar',
+                orientation: 'h',
+                name: greek === 'gex' ? 'Put GEX' : (greek === 'dex' ? 'Put DEX' : 'Put OI 매물대'),
+                opacity: 0.45,
+                marker: putMarker,
+                customdata: putCustomData,
+                hovertemplate: putHover
+            };
+
+            // 3. 차트 레이아웃 구성
+            const layout = {
+                title: {
+                    text: `📈 ${data.underlying_ticker} 일봉 캔들 & 옵션 노출 분포 (지표: ${greek.toUpperCase()})`,
+                    font: { color: '#f1f5f9' },
+                    x: 0.5,
+                    xanchor: 'center',
+                    yref: 'container',
+                    y: 0.98,
+                    yanchor: 'top'
+                },
+                paper_bgcolor: 'rgba(0,0,0,0)',
+                plot_bgcolor: 'rgba(0,0,0,0)',
+                xaxis: {
+                    title: { text: '날짜 (Date)', font: { color: '#ffffff' } },
+                    gridcolor: '#334155',
+                    tickcolor: '#ffffff',
+                    tickfont: { color: '#ffffff' },
+                    rangeslider: { visible: false }
+                },
+                xaxis2: {
+                    title: { text: xAxis2Title, font: { color: '#ffffff' } },
+                    gridcolor: 'rgba(0,0,0,0)',
+                    tickcolor: '#ffffff',
+                    tickfont: { color: '#ffffff' },
+                    overlaying: 'x',
+                    side: 'top'
+                },
+                yaxis: {
+                    title: { text: '가격 및 행사가격 (Price / Strike)', font: { color: '#ffffff' } },
+                    gridcolor: '#334155',
+                    tickcolor: '#ffffff',
+                    tickfont: { color: '#ffffff' }
+                },
+                barmode: 'overlay',
+                margin: { t: 120, b: 50, l: 60, r: 140 } // 상단 120px: 제목과 상단축(지표) 제목 겹침 방지
+            };
+
+            // Y축 스케일 범위: 사용자 지정값 우선, 없으면 현재가 기준 하방 90% ~ 상방 110%
+            if (customYRange) {
+                layout.yaxis.range = customYRange;
+            } else if (data.spot_price) {
+                layout.yaxis.range = [data.spot_price * 0.9, data.spot_price * 1.1];
+            }
+
+            // 가이드라인 채우기 (현재가, 감마 플립 가격, Call Wall, Put Wall)
+            layout.shapes = [];
+            layout.annotations = [];
+            
+            if (times.length > 0) {
+                const xStart = times[0];
+                const xEnd = times[times.length - 1];
+                
+                // 1. Spot Price (현재가) - 노란색 실선 (두께 2.5)
+                if (data.spot_price) {
+                    layout.shapes.push({
+                        type: 'line',
+                        x0: xStart,
+                        x1: xEnd,
+                        y0: data.spot_price,
+                        y1: data.spot_price,
+                        line: {
+                            color: '#ffe600', // 선명한 노랑
+                            width: 2.5,
+                            dash: 'dot'
+                        }
+                    });
+                    layout.annotations.push({
+                        x: 1.005,
+                        y: data.spot_price,
+                        xref: 'paper',
+                        yref: 'y',
+                        text: ` Spot ($${data.spot_price.toFixed(2)})`,
+                        showarrow: false,
+                        xanchor: 'left',
+                        yanchor: 'middle',
+                        font: { color: '#ffe600', size: 11, weight: 'bold' }
+                    });
+                }
+                
+                // 2. Gamma Flip Price - 빨간색 점선 (두께 2)
+                if (data.gamma_flip_price) {
+                    layout.shapes.push({
+                        type: 'line',
+                        x0: xStart,
+                        x1: xEnd,
+                        y0: data.gamma_flip_price,
+                        y1: data.gamma_flip_price,
+                        line: {
+                            color: '#ffffff', // 선명한 흰색
+                            width: 2,
+                            dash: 'dot'
+                        }
+                    });
+                    layout.annotations.push({
+                        x: 1.005,
+                        y: data.gamma_flip_price,
+                        xref: 'paper',
+                        yref: 'y',
+                        text: ` Flip ($${data.gamma_flip_price.toFixed(2)})`,
+                        showarrow: false,
+                        xanchor: 'left',
+                        yanchor: 'middle',
+                        font: { color: '#ffffff', size: 11, weight: 'bold' }
+                    });
+                }
+                
+                // 3. Call Wall - 하늘색 파선 (두께 2)
+                if (data.call_wall) {
+                    layout.shapes.push({
+                        type: 'line',
+                        x0: xStart,
+                        x1: xEnd,
+                        y0: data.call_wall,
+                        y1: data.call_wall,
+                        line: {
+                            color: '#00e5ff', // Neon Cyan
+                            width: 2,
+                            dash: 'dash'
+                        }
+                    });
+                    layout.annotations.push({
+                        x: 1.005,
+                        y: data.call_wall,
+                        xref: 'paper',
+                        yref: 'y',
+                        text: ` Call Wall ($${data.call_wall.toFixed(2)})`,
+                        showarrow: false,
+                        xanchor: 'left',
+                        yanchor: 'middle',
+                        font: { color: '#00e5ff', size: 11, weight: 'bold' }
+                    });
+                }
+                
+                // 4. Put Wall - 주황색 파선 (두께 2)
+                if (data.put_wall) {
+                    layout.shapes.push({
+                        type: 'line',
+                        x0: xStart,
+                        x1: xEnd,
+                        y0: data.put_wall,
+                        y1: data.put_wall,
+                        line: {
+                            color: '#ff9800', // Orange 500
+                            width: 2,
+                            dash: 'dash'
+                        }
+                    });
+                    layout.annotations.push({
+                        x: 1.005,
+                        y: data.put_wall,
+                        xref: 'paper',
+                        yref: 'y',
+                        text: ` Put Wall ($${data.put_wall.toFixed(2)})`,
+                        showarrow: false,
+                        xanchor: 'left',
+                        yanchor: 'middle',
+                        font: { color: '#ff9800', size: 11, weight: 'bold' }
+                    });
+                }
+            }
+
+            const chartTraces = [];
+            if (times.length > 0) {
+                chartTraces.push(candleTrace);
+            }
+            chartTraces.push(callTrace);
+            chartTraces.push(putTrace);
+
+            // 차트 렌더링
+            Plotly.newPlot('plotly-chart', chartTraces, layout, {responsive: true, displayModeBar: false}).then((gd) => {
+                updateRangeInputs();
+                spreadGuidelineLabels();
+                updateXScaleDisplay();
+                // 줌/팬으로 축 범위가 바뀔 때마다 레이블 겹침 재조정 + 일봉 수 갱신 (1회만 바인딩)
+                if (gd && !gd._guidelineHooked) {
+                    gd._guidelineHooked = true;
+                    gd.on('plotly_relayout', () => {
+                        spreadGuidelineLabels();
+                        updateXScaleDisplay();
+                    });
+                }
+            });
+        }
+
+        // 현재 차트에 보이는 일봉(거래일) 수를 계산하여 표시
+        function updateXScaleDisplay() {
+            const el = document.getElementById('x-scale-display');
+            if (!el) return;
+            const gd = document.getElementById('plotly-chart');
+            const hist = (optionData && optionData.stock_history) ? optionData.stock_history : [];
+            if (!gd || !gd._fullLayout || !gd._fullLayout.xaxis || !hist.length) { el.textContent = '-'; return; }
+
+            const xr = (gd.layout.xaxis && gd.layout.xaxis.range) ? gd.layout.xaxis.range : gd._fullLayout.xaxis.range;
+            const toMs = v => (typeof v === 'number') ? v : new Date(v).getTime();
+            let lo = -Infinity, hi = Infinity;
+            if (xr) { lo = toMs(xr[0]); hi = toMs(xr[1]); }
+
+            const visible = hist.filter(h => { const t = new Date(h.time).getTime(); return t >= lo && t <= hi; });
+            el.textContent = `${visible.length}일봉`;
+        }
+
+        // 오른쪽 가이드라인 레이블(Spot/Flip/Call Wall/Put Wall) 겹침 방지 동적 배치
+        let _spreadingLabels = false;
+        function spreadGuidelineLabels() {
+            if (_spreadingLabels) return;
+            const gd = document.getElementById('plotly-chart');
+            if (!gd || !gd._fullLayout || !gd._fullLayout.yaxis || !gd._fullLayout.yaxis.l2p) return;
+            const anns = gd.layout.annotations || [];
+            if (anns.length === 0) return;
+
+            _spreadingLabels = true;
+            const ya = gd._fullLayout.yaxis;
+
+            // 1) 기존 yshift 초기화 후 실제 데이터 기준 픽셀 위치 측정
+            const clear = {};
+            anns.forEach((a, i) => { clear[`annotations[${i}].yshift`] = 0; });
+            Plotly.relayout(gd, clear).then(() => {
+                const items = anns
+                    .map((a, i) => ({ i, py: ya.l2p(a.y) + ya._offset }))
+                    .filter(it => isFinite(it.py))
+                    .sort((p, q) => p.py - q.py); // 위(작은 px)부터 정렬
+
+                const minGap = 15; // 레이블 간 최소 간격(px)
+                let last = -Infinity;
+                const update = {};
+                items.forEach(it => {
+                    let py = it.py;
+                    if (py - last < minGap) py = last + minGap; // 겹치면 아래로 밀기
+                    // yshift는 +가 위쪽 → 아래로 이동시키려면 음수
+                    update[`annotations[${it.i}].yshift`] = -(py - it.py);
+                    last = py;
+                });
+                Plotly.relayout(gd, update).then(() => { _spreadingLabels = false; })
+                    .catch(() => { _spreadingLabels = false; });
+            }).catch(() => { _spreadingLabels = false; });
+        }
+
+        function fillDataTable(options) {
+            tableBody.innerHTML = options.map(opt => {
+                const isCall = opt.t === 'call';
+                const badgeColor = isCall ? 'bg-blue-900/50 text-blue-300' : 'bg-red-900/50 text-red-300';
+                
+                return `
+                    <tr class="hover:bg-slate-700/30 transition">
+                        <td class="py-2.5 px-4 font-mono text-xs">${opt.s}</td>
+                        <td class="py-2.5 px-4">
+                            <span class="px-2 py-0.5 rounded text-xs font-semibold ${badgeColor}">
+                                ${opt.t.toUpperCase()}
+                            </span>
+                        </td>
+                        <td class="py-2.5 px-4 text-right font-medium">${opt.k.toFixed(2)}</td>
+                        <td class="py-2.5 px-4 text-right">${opt.lp !== null ? opt.lp.toFixed(2) : '-'}</td>
+                        <td class="py-2.5 px-4 text-right">${opt.b !== null ? opt.b.toFixed(2) : '-'}</td>
+                        <td class="py-2.5 px-4 text-right">${opt.a !== null ? opt.a.toFixed(2) : '-'}</td>
+                        <td class="py-2.5 px-4 text-right">${opt.vo.toLocaleString()}</td>
+                        <td class="py-2.5 px-4 text-right font-semibold">${opt.o.toLocaleString()}</td>
+                        <td class="py-2.5 px-4 text-right">${opt.iv !== null ? (opt.iv * 100).toFixed(2) : '-'}%</td>
+                        <td class="py-2.5 px-4 text-right font-mono text-xs">${opt.d !== null ? opt.d.toFixed(4) : '-'}</td>
+                        <td class="py-2.5 px-4 text-right font-mono text-xs">${opt.g !== null ? opt.g.toFixed(6) : '-'}</td>
+                        <td class="py-2.5 px-4 text-right font-mono text-xs">${opt.v !== null ? opt.v.toFixed(4) : '-'}</td>
+                        <td class="py-2.5 px-4 text-right font-mono text-xs">${opt.th !== null ? opt.th.toFixed(4) : '-'}</td>
+                        <td class="py-2.5 px-4 text-right font-mono text-xs text-emerald-400 font-semibold">${opt.gex !== undefined ? formatDollarValue(opt.gex) : '-'}</td>
+                        <td class="py-2.5 px-4 text-right font-mono text-xs text-cyan-400 font-semibold">${opt.dex !== undefined ? formatDollarValue(opt.dex) : '-'}</td>
+                    </tr>
+                `;
+            }).join('');
+        }
+    </script>
+</body>
+</html>
