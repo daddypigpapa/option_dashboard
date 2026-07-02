@@ -12,6 +12,13 @@ FinanceToolkit_daddypigpapa/
 # 원자적 쓰기 임시 파일 잔여물
 *.tmp.*
 
+# 한국투자증권 API 비밀키 및 토큰 캐시 (절대 커밋 금지)
+kis_config.json
+kis_token.json
+
+# 주식옵션 종목마스터 일일 캐시 (재생성 가능)
+kr_option_universe.json
+
 # 로컬 하네스/에디터 설정
 .claude/
 

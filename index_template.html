@@ -41,6 +41,13 @@
         </div>
     </header>
 
+    <!-- Market Page Switcher (미국 ETF / 한국 ETF / KOSPI 개별주) -->
+    <div id="market-tabs" class="max-w-7xl mx-auto px-4 pt-4 flex flex-wrap gap-2">
+        <button data-market="us" class="market-tab">🇺🇸 미국 ETF</button>
+        <button data-market="kr_etf" class="market-tab">🇰🇷 한국 ETF (거래대금 20)</button>
+        <button data-market="kr_stock" class="market-tab">🇰🇷 KOSPI 개별주 (시총 50)</button>
+    </div>
+
     <!-- Main Content Area -->
     <main class="max-w-7xl mx-auto p-4 md:p-6 grid grid-cols-1 lg:grid-cols-4 gap-6">
 
@@ -248,7 +255,19 @@
         let rawExpirations = [];
         let optionData = {};
         let customYRange = null;
+        let currentMarket = 'us'; // 활성 페이지: 'us' | 'kr_etf' | 'kr_stock'
         const _loadedTickers = new Set(); // 이미 로드된 옵션 JS 파일 추적
+
+        // 시장 탭 버튼 스타일
+        const TAB_ACTIVE = 'market-tab bg-blue-600 text-white text-sm font-semibold px-4 py-2 rounded-lg transition';
+        const TAB_INACTIVE = 'market-tab bg-slate-800 hover:bg-slate-700 text-slate-400 text-sm font-semibold px-4 py-2 rounded-lg border border-slate-700 transition cursor-pointer';
+
+        // 시장별 데이터 없음 안내 문구
+        const MARKET_EMPTY_MSG = {
+            us: '데이터 없음 (usa_etf_option_collect.py 실행 필요)',
+            kr_etf: '데이터 없음 — kis_config.json 설정 후 kr_collect.py 실행',
+            kr_stock: '데이터 없음 — kis_config.json 설정 후 kr_collect.py 실행'
+        };
 
         // DOM Elements
         const tickerSelect = document.getElementById('ticker-select');
@@ -329,18 +348,47 @@
                 tableContainer.classList.toggle('hidden');
                 tableArrow.classList.toggle('rotate-180');
             });
+
+            // 시장 페이지 스위칭 탭 바인딩
+            document.querySelectorAll('.market-tab').forEach(btn => {
+                btn.addEventListener('click', () => switchMarket(btn.dataset.market));
+            });
         });
 
-        function initApp() {
-            const tickers = Object.keys(window.optionsMeta);
+        function switchMarket(market) {
+            currentMarket = market;
+            document.querySelectorAll('.market-tab').forEach(btn => {
+                btn.className = (btn.dataset.market === market) ? TAB_ACTIVE : TAB_INACTIVE;
+            });
+            populateTickers();
+        }
 
-            if (tickers && tickers.length > 0) {
-                tickerSelect.innerHTML = tickers.map(ticker =>
-                    `<option value="${ticker}">${ticker}</option>`
-                ).join('');
+        function initApp() {
+            switchMarket(currentMarket); // 탭 스타일 초기화 + 티커 목록 구성
+        }
+
+        function populateTickers() {
+            // 활성 시장에 속한 티커만 필터 (기존 미국 데이터는 market 필드가 없어도 'us'로 간주)
+            const tickers = Object.keys(window.optionsMeta)
+                .filter(t => (window.optionsMeta[t].market || 'us') === currentMarket);
+
+            if (tickers.length > 0) {
+                tickerSelect.disabled = false;
+                tickerSelect.innerHTML = tickers.map(t => {
+                    const nm = window.optionsMeta[t].name;
+                    const label = nm ? `${nm} (${t})` : t;
+                    return `<option value="${t}">${label}</option>`;
+                }).join('');
                 onTickerChange();
             } else {
-                tickerSelect.innerHTML = `<option value="">데이터 없음 (usa_etf_option_collect.py 실행 필요)</option>`;
+                tickerSelect.disabled = true;
+                tickerSelect.innerHTML = `<option value="">${MARKET_EMPTY_MSG[currentMarket]}</option>`;
+                expirySelect.disabled = true;
+                expirySelect.innerHTML = `<option value="">없음</option>`;
+                noExpiryWarning.classList.add('hidden');
+                clearMetrics();
+                Plotly.purge('plotly-chart');
+                tableBody.innerHTML = '';
             }
         }
 
@@ -392,6 +440,14 @@
 
             rawExpirations = tickerMeta.expirations || [];
 
+            // 옵션 미보유 종목(한국 ETF/개별주 등)은 데이터 파일 로드 없이 즉시 진행
+            if (tickerMeta.has_options === false) {
+                window[`_etfOptions_${selectedTicker}`] = {};
+                _loadedTickers.add(selectedTicker);
+                onExpiryFilterChange();
+                return;
+            }
+
             loadTickerOptions(selectedTicker, () => {
                 onExpiryFilterChange();
             });
@@ -422,12 +478,43 @@
                 }).join('');
                 onExpiryChange();
             } else {
-                noExpiryWarning.classList.remove('hidden');
                 expirySelect.disabled = true;
                 expirySelect.innerHTML = `<option value="">없음</option>`;
-                clearMetrics();
-                Plotly.purge('plotly-chart');
                 tableBody.innerHTML = '';
+
+                if (tickerMeta && (tickerMeta.stock_history || []).length > 0) {
+                    // 옵션이 없어도 주가 일봉 차트는 표시 (한국 ETF/개별주 등)
+                    noExpiryWarning.textContent = (tickerMeta.has_options === false)
+                        ? 'ℹ️ 옵션 데이터 없음(미상장 또는 무거래) — 주가 차트만 표시됩니다.'
+                        : '⚠️ 일치하는 만기일이 없습니다.';
+                    noExpiryWarning.classList.remove('hidden');
+
+                    customYRange = null;
+                    optionData = {
+                        underlying_ticker: tickerSelect.value,
+                        expiry: null,
+                        collected_date: tickerMeta.collected_date,
+                        spot_price: tickerMeta.spot_price,
+                        total_oi: tickerMeta.total_oi || 0,
+                        pcr_oi: tickerMeta.pcr_oi || 0,
+                        net_gex: tickerMeta.net_gex || 0,
+                        net_dex: tickerMeta.net_dex || 0,
+                        call_wall: tickerMeta.call_wall,
+                        put_wall: tickerMeta.put_wall,
+                        gamma_flip_price: tickerMeta.gamma_flip_price,
+                        currency: tickerMeta.currency || 'USD',
+                        options: [],
+                        stock_history: tickerMeta.stock_history || []
+                    };
+                    updateMetrics(optionData);
+                    const selectedGreek = document.querySelector('input[name="greek-radio"]:checked').value;
+                    drawChart(optionData, selectedGreek);
+                } else {
+                    noExpiryWarning.textContent = '⚠️ 일치하는 만기일이 없습니다.';
+                    noExpiryWarning.classList.remove('hidden');
+                    clearMetrics();
+                    Plotly.purge('plotly-chart');
+                }
             }
         }
 
@@ -478,6 +565,7 @@
                 call_wall: tickerMeta.call_wall,
                 put_wall: tickerMeta.put_wall,
                 gamma_flip_price: tickerMeta.gamma_flip_price,
+                currency: tickerMeta.currency || 'USD',
                 options: options,
                 stock_history: tickerMeta.stock_history || []
             };
@@ -559,9 +647,16 @@
         }
 
         function updateMetrics(data) {
-            spotPriceEl.innerText = `$${data.spot_price.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})} USD`;
-            totalOiEl.innerText = `${data.total_oi.toLocaleString()} 계약`;
-            pcrOiEl.innerText = data.pcr_oi;
+            const isKRW = data.currency === 'KRW';
+            const cs = isKRW ? '₩' : '$';
+            const cu = isKRW ? 'KRW' : 'USD';
+            const priceOpts = isKRW
+                ? {minimumFractionDigits: 0, maximumFractionDigits: 0}
+                : {minimumFractionDigits: 2, maximumFractionDigits: 2};
+
+            spotPriceEl.innerText = `${cs}${(data.spot_price || 0).toLocaleString(undefined, priceOpts)} ${cu}`;
+            totalOiEl.innerText = `${(data.total_oi || 0).toLocaleString()} 계약`;
+            pcrOiEl.innerText = data.pcr_oi != null ? data.pcr_oi : '-';
             collectedDateEl.innerText = data.collected_date;
 
             // GEX / DEX formatting & colors
@@ -579,9 +674,9 @@
                 netDexEl.className = "text-sm md:text-base font-bold mt-1 text-rose-400";
             }
 
-            gammaFlipEl.innerText = data.gamma_flip_price ? `$${data.gamma_flip_price.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})} USD` : '- USD';
-            callWallEl.innerText = data.call_wall ? `$${data.call_wall.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})} USD` : '- USD';
-            putWallEl.innerText = data.put_wall ? `$${data.put_wall.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})} USD` : '- USD';
+            gammaFlipEl.innerText = data.gamma_flip_price ? `${cs}${data.gamma_flip_price.toLocaleString(undefined, priceOpts)} ${cu}` : `- ${cu}`;
+            callWallEl.innerText = data.call_wall ? `${cs}${data.call_wall.toLocaleString(undefined, priceOpts)} ${cu}` : `- ${cu}`;
+            putWallEl.innerText = data.put_wall ? `${cs}${data.put_wall.toLocaleString(undefined, priceOpts)} ${cu}` : `- ${cu}`;
         }
 
         function clearMetrics() {
@@ -602,6 +697,9 @@
         function drawChart(data, greek) {
             const options = data.options;
             const history = data.stock_history || [];
+            // 통화별 가격 포맷터 (KRW: 정수+콤마, USD: 소수 2자리)
+            const _cs = data.currency === 'KRW' ? '₩' : '$';
+            const fmtP = v => _cs + (data.currency === 'KRW' ? Math.round(v).toLocaleString() : v.toFixed(2));
 
             // 1. 주가 캔들스틱 데이터 배열 구성
             const times = [];
@@ -883,7 +981,7 @@
                         y: data.spot_price,
                         xref: 'paper',
                         yref: 'y',
-                        text: ` Spot ($${data.spot_price.toFixed(2)})`,
+                        text: ` Spot (${fmtP(data.spot_price)})`,
                         showarrow: false,
                         xanchor: 'left',
                         yanchor: 'middle',
@@ -910,7 +1008,7 @@
                         y: data.gamma_flip_price,
                         xref: 'paper',
                         yref: 'y',
-                        text: ` Flip ($${data.gamma_flip_price.toFixed(2)})`,
+                        text: ` Flip (${fmtP(data.gamma_flip_price)})`,
                         showarrow: false,
                         xanchor: 'left',
                         yanchor: 'middle',
@@ -937,7 +1035,7 @@
                         y: data.call_wall,
                         xref: 'paper',
                         yref: 'y',
-                        text: ` Call Wall ($${data.call_wall.toFixed(2)})`,
+                        text: ` Call Wall (${fmtP(data.call_wall)})`,
                         showarrow: false,
                         xanchor: 'left',
                         yanchor: 'middle',
@@ -964,7 +1062,7 @@
                         y: data.put_wall,
                         xref: 'paper',
                         yref: 'y',
-                        text: ` Put Wall ($${data.put_wall.toFixed(2)})`,
+                        text: ` Put Wall (${fmtP(data.put_wall)})`,
                         showarrow: false,
                         xanchor: 'left',
                         yanchor: 'middle',

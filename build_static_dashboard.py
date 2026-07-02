@@ -6,11 +6,24 @@ from datetime import date
 from sqlalchemy import desc
 
 from database import SessionLocal, OptionSnapshot, StockHistory
+from config import KR_ETFS, KOSPI50
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("StaticBuilder")
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# 시장 구분용 매핑: 종목코드 → 한글명
+KR_ETF_NAMES = {e["code"]: e["name"] for e in KR_ETFS}
+KOSPI_NAMES = {s["code"]: s["name"] for s in KOSPI50}
+
+def get_market_info(ticker):
+    """티커의 시장 구분(us/kr_etf/kr_stock), 표시명, 통화를 반환."""
+    if ticker in KR_ETF_NAMES:
+        return "kr_etf", KR_ETF_NAMES[ticker], "KRW"
+    if ticker in KOSPI_NAMES:
+        return "kr_stock", KOSPI_NAMES[ticker], "KRW"
+    return "us", None, "USD"
 
 def calculate_bs_gamma(S, K, T, r, sigma):
     """
@@ -72,27 +85,39 @@ def build_dashboard():
     db = SessionLocal()
     
     try:
-        # 1. 고유 티커 목록 조회
-        tickers_rec = db.query(OptionSnapshot.underlying_ticker).distinct().all()
-        tickers = [t[0] for t in tickers_rec]
-        
-        if not tickers:
+        # 1. 고유 티커 목록 조회 (옵션 보유 + 주가 전용 티커 모두 포함)
+        opt_tickers = {t[0] for t in db.query(OptionSnapshot.underlying_ticker).distinct().all()}
+        stk_tickers = {t[0] for t in db.query(StockHistory.underlying_ticker).distinct().all()}
+        all_tickers = opt_tickers | stk_tickers
+
+        if not all_tickers:
             logger.warning("DB에 저장된 티커 정보가 없어 빌드를 중단합니다. 수집기를 먼저 돌려주세요.")
             return False
-            
+
+        # 표시 순서: 미국(알파벳) → 한국 ETF(거래대금 순위) → KOSPI(시총 순위)
+        us_tickers = sorted(t for t in all_tickers if get_market_info(t)[0] == "us")
+        kr_etf_tickers = [e["code"] for e in KR_ETFS if e["code"] in all_tickers]
+        kr_stock_tickers = [s["code"] for s in KOSPI50 if s["code"] in all_tickers]
+        tickers = us_tickers + kr_etf_tickers + kr_stock_tickers
+
         options_database = {}
-        
+
         # 2. 각 티커별 최신 스냅샷 데이터 가공
         for ticker in tickers:
-            # 해당 티커의 가장 최근 수집 일자 쿼리
+            # 해당 티커의 가장 최근 수집 일자 쿼리 (옵션 우선, 없으면 주가 이력 기준)
             latest_date_rec = db.query(OptionSnapshot.collected_date)\
                 .filter_by(underlying_ticker=ticker)\
                 .order_by(desc(OptionSnapshot.collected_date))\
                 .first()
-                
+            if not latest_date_rec:
+                latest_date_rec = db.query(StockHistory.collected_date)\
+                    .filter_by(underlying_ticker=ticker)\
+                    .order_by(desc(StockHistory.collected_date))\
+                    .first()
+
             if not latest_date_rec:
                 continue
-                
+
             collected_date = latest_date_rec[0]
             
             # 해당 수집일자의 주가 일봉 로드
@@ -144,10 +169,34 @@ def build_dashboard():
                 underlying_ticker=ticker,
                 collected_date=collected_date
             ).order_by(OptionSnapshot.strike).all()
-            
+
+            market, display_name, currency = get_market_info(ticker)
+
             if not option_recs:
+                # 옵션 미보유 종목(한국 ETF/개별주 등) → 주가 전용 항목으로 등록
+                if not stock_history:
+                    continue
+                options_database[ticker] = {
+                    "market": market,
+                    "name": display_name,
+                    "currency": currency,
+                    "has_options": False,
+                    "spot_price": stock_history[-1]["close"],
+                    "collected_date": str(collected_date),
+                    "total_oi": 0,
+                    "pcr_oi": 0.0,
+                    "net_gex": 0.0,
+                    "net_dex": 0.0,
+                    "call_wall": None,
+                    "put_wall": None,
+                    "gamma_flip_price": None,
+                    "expirations": [],
+                    "stock_history": stock_history,
+                    "options": {}
+                }
+                logger.info(f" -> [{ticker}] 주가 전용 직렬화 완료 (일봉 {len(stock_history)}개)")
                 continue
-                
+
             spot_price = round(option_recs[0].spot_price, 2)
             
             # 만기일 리스트 추출 및 만기별 데이터 그룹화
@@ -177,13 +226,15 @@ def build_dashboard():
                 th_val = round(o.theta, 4) if o.theta is not None else None
                 
                 # 1. 개별 옵션 GEX, DEX 계산
-                # GEX (Dollar Gamma Exposure) = sign * gamma * OI * 100 * S^2 * 0.01 = sign * gamma * OI * S^2
-                # DEX (Dollar Delta Exposure) = delta * OI * 100 * S
+                # GEX (Dollar Gamma) = sign * gamma * OI * mult * S^2 * 0.01
+                # DEX (Dollar Delta) = delta * OI * mult * S
+                # 거래승수(mult): 미국 옵션 100주, 한국 개별주식옵션 10주
+                mult = 10.0 if market == "kr_stock" else 100.0
                 oi_val = o.open_interest or 0
                 sign = 1.0 if o.option_type == "call" else -1.0
-                
-                opt_gex = sign * (g_val or 0.0) * oi_val * (spot_price ** 2)
-                opt_dex = (d_val or 0.0) * oi_val * 100.0 * spot_price
+
+                opt_gex = sign * (g_val or 0.0) * oi_val * mult * 0.01 * (spot_price ** 2)
+                opt_dex = (d_val or 0.0) * oi_val * mult * spot_price
                 
                 total_gex += opt_gex
                 total_dex += opt_dex
@@ -230,6 +281,10 @@ def build_dashboard():
             gamma_flip_price = calculate_gamma_flip_price(spot_price, option_recs)
             
             options_database[ticker] = {
+                "market": market,
+                "name": display_name,
+                "currency": currency,
+                "has_options": True,
                 "spot_price": spot_price,
                 "collected_date": str(collected_date),
                 "total_oi": total_oi,
@@ -251,12 +306,13 @@ def build_dashboard():
 
         meta_database = {}  # HTML 인라인용 요약 데이터 (options 제외)
         for ticker, info in options_database.items():
-            # options 키를 별도 JS 파일로 분리 저장
-            options_payload = json.dumps(info["options"], ensure_ascii=False, separators=(',', ':'))
-            js_path = os.path.join(data_dir, f"{ticker}_options.js")
-            with open(js_path, "w", encoding="utf-8") as f:
-                f.write(f"window._etfOptions_{ticker}={options_payload};")
-            logger.info(f" -> [{ticker}] 옵션 데이터 분리 저장: {js_path} ({os.path.getsize(js_path)//1024}KB)")
+            # 옵션 보유 종목만 별도 JS 파일로 분리 저장 (주가 전용 종목은 파일 불필요)
+            if info.get("has_options", True):
+                options_payload = json.dumps(info["options"], ensure_ascii=False, separators=(',', ':'))
+                js_path = os.path.join(data_dir, f"{ticker}_options.js")
+                with open(js_path, "w", encoding="utf-8") as f:
+                    f.write(f"window._etfOptions_{ticker}={options_payload};")
+                logger.info(f" -> [{ticker}] 옵션 데이터 분리 저장: {js_path} ({os.path.getsize(js_path)//1024}KB)")
 
             # HTML 인라인 페이로드에는 options 제외
             meta_database[ticker] = {k: v for k, v in info.items() if k != "options"}

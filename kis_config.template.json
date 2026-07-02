@@ -1,0 +1,7 @@
+{
+  "_설명": "이 파일을 kis_config.json 으로 복사한 뒤 한국투자증권 OpenAPI 앱키/시크릿을 입력하세요. kis_config.json 은 .gitignore 로 저장소에 올라가지 않습니다.",
+  "_발급처": "https://apiportal.koreainvestment.com (KIS Developers > 앱 등록)",
+  "app_key": "여기에_앱키_입력",
+  "app_secret": "여기에_앱시크릿_입력",
+  "is_paper": false
+}

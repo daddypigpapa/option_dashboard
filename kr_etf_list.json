@@ -1,0 +1,22 @@
+[
+  {"code": "252670", "name": "KODEX 200선물인버스2X"},
+  {"code": "122630", "name": "KODEX 레버리지"},
+  {"code": "069500", "name": "KODEX 200"},
+  {"code": "229200", "name": "KODEX 코스닥150"},
+  {"code": "233740", "name": "KODEX 코스닥150레버리지"},
+  {"code": "251340", "name": "KODEX 코스닥150선물인버스"},
+  {"code": "114800", "name": "KODEX 인버스"},
+  {"code": "459580", "name": "KODEX CD금리액티브(합성)"},
+  {"code": "423160", "name": "KODEX KOFR금리액티브(합성)"},
+  {"code": "357870", "name": "TIGER CD금리투자KIS(합성)"},
+  {"code": "133690", "name": "TIGER 미국나스닥100"},
+  {"code": "360750", "name": "TIGER 미국S&P500"},
+  {"code": "381180", "name": "TIGER 미국필라델피아반도체나스닥"},
+  {"code": "371460", "name": "TIGER 차이나전기차SOLACTIVE"},
+  {"code": "305720", "name": "KODEX 2차전지산업"},
+  {"code": "091160", "name": "KODEX 반도체"},
+  {"code": "102110", "name": "TIGER 200"},
+  {"code": "379800", "name": "KODEX 미국S&P500TR"},
+  {"code": "153130", "name": "KODEX 단기채권"},
+  {"code": "272580", "name": "TIGER 단기채권액티브"}
+]
