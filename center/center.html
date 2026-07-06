@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Trading Center — 관제 센터</title>
+<!-- MARKET AI DASHBOARD 임베드용 관제 센터 (메뉴: 관제 센터 → iframe /center/).
+     ai_trading_center(관제 레포)의 dashboard_bridge.py 가 발행하는 live_status.js 소비 —
+     Flask가 /center/data/live_status.js 를 dashboard_project/data/ 에서 서빙. -->
+<style>
+  :root { --bg:#0f172a; --card:#1e293b; --line:#334155; --txt:#f1f5f9; --mut:#94a3b8;
+          --up:#34d399; --dn:#fb7185; --amber:#fbbf24; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--txt);
+         font-family:'Segoe UI', 'Malgun Gothic', sans-serif; }
+  header { background:var(--card); border-bottom:1px solid var(--line); padding:16px 24px;
+           display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; }
+  header h1 { font-size:20px; margin:0; }
+  header a { color:var(--mut); font-size:13px; text-decoration:none; border:1px solid var(--line);
+             padding:6px 12px; border-radius:999px; }
+  header a:hover { color:var(--txt); }
+  main { max-width:1120px; margin:0 auto; padding:20px 16px; display:flex; flex-direction:column; gap:20px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:18px; }
+  .card h2 { font-size:15px; margin:0 0 12px; color:var(--txt); border-bottom:1px solid var(--line); padding-bottom:8px; }
+  .muted { color:var(--mut); font-size:12px; }
+  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+  @media (max-width:720px) { .grid2 { grid-template-columns:1fr; } }
+  .sub { background:rgba(15,23,42,.6); border:1px solid var(--line); border-radius:8px; padding:12px; }
+  .sub h3 { font-size:12px; margin:0 0 8px; color:var(--mut); text-transform:uppercase; letter-spacing:.05em; }
+  .kv { display:grid; grid-template-columns:1fr 1fr; gap:8px; font-size:13px; }
+  .kv .k { color:var(--mut); font-size:11px; }
+  .kv .v { font-weight:600; }
+  table { width:100%; border-collapse:collapse; font-size:12px; }
+  th, td { padding:6px 8px; text-align:right; border-bottom:1px solid var(--line); }
+  th { color:var(--mut); font-weight:600; }
+  th:first-child, td:first-child { text-align:left; }
+  .up { color:var(--up); } .dn { color:var(--dn); } .sig { color:var(--amber); font-weight:700; }
+  .empty { color:var(--mut); font-size:13px; padding:6px 0; }
+  footer { max-width:1120px; margin:0 auto; padding:0 16px 28px; color:var(--mut); font-size:12px; line-height:1.7; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🎛️ AI Trading Center — 관제 센터</h1>
+  <div style="display:flex; gap:8px; align-items:center;">
+    <span id="gen-time" class="muted">발행물 없음 — ai_trading_center에서 python dashboard_bridge.py 실행</span>
+  </div>
+</header>
+<main>
+  <section class="card">
+    <h2>🤖 트레이딩 봇 실황</h2>
+    <div class="grid2">
+      <div class="sub"><h3>FVG 당일청산 봇 (KODEX ETF)</h3><div id="fvg" class="empty">상태 없음</div></div>
+      <div class="sub"><h3>눌림목 봇 (KOSPI50 Strategy C)</h3><div id="dip" class="empty">상태 없음</div></div>
+    </div>
+  </section>
+  <section class="card">
+    <h2>📅 계절성 통계 (annual-trading / tools/seasonality_pipeline.py)</h2>
+    <div id="seasonality" class="empty">보고서 없음 — python tools/seasonality_pipeline.py run --ticker ... 실행</div>
+  </section>
+  <section class="card">
+    <h2>🔬 심층분석(ANALYSIS) 라운드 기록</h2>
+    <div id="rounds" class="empty">라운드 기록 없음 — analysis-orchestrator 가동 시 축적됩니다</div>
+  </section>
+</main>
+<footer>
+  장중 실황: 관제 레포에서 <b>python dashboard_bridge.py --watch 60</b> 실행 → 이 페이지가 60초 주기로 자동 갱신(http 서빙 시).
+  계절성 유의(*)는 Bonferroni 보정(|t|≥2.87) 통과 월만 표시 — 그 외는 통계적 근거 없는 경향.
+  본 화면은 정보 제공 목적이며 투자 권유가 아닙니다.
+</footer>
+<script src="./data/live_status.js"></script>
+<script>
+const POLL_MS = 60000;
+function krw(v) {
+  if (v === null || v === undefined || isNaN(v)) return '-';
+  return '₩' + Math.round(v).toLocaleString('ko-KR');
+}
+function kvRow(k, v, cls) {
+  return '<div><div class="k">' + k + '</div><div class="v ' + (cls || '') + '">' + v + '</div></div>';
+}
+function render(ls) {
+  if (!ls) return;
+  document.getElementById('gen-time').textContent = '발행: ' + ls.generated_at + ' (dashboard_bridge.py)';
+
+  const fvg = ls.fvg_bot || {};
+  const fvgEl = document.getElementById('fvg');
+  if (fvg.available) {
+    const pnl = fvg.today_pnl || 0, cum = fvg.cumulative_pnl || 0;
+    fvgEl.className = '';
+    fvgEl.innerHTML = '<div class="kv">' +
+      kvRow('당일 손익', krw(pnl), pnl >= 0 ? 'up' : 'dn') +
+      kvRow('누적 손익', krw(cum), cum >= 0 ? 'up' : 'dn') +
+      kvRow('당일 체결', (fvg.today_trades_count || 0) + '건') +
+      kvRow('현금', krw(fvg.current_cash)) + '</div>';
+  } else {
+    fvgEl.className = 'empty';
+    fvgEl.textContent = '상태 없음 (state.json 미발견 — 봇 미가동)';
+  }
+
+  const dip = ls.dip_bot || {};
+  const dipEl = document.getElementById('dip');
+  if (dip.available) {
+    const names = Object.entries(dip.holdings || {})
+      .map(([sym, h]) => (h.name || sym) + '(' + h.qty + ')').join(', ') || '없음';
+    dipEl.className = '';
+    dipEl.innerHTML = '<div class="kv">' +
+      kvRow('현금', krw(dip.cash)) +
+      kvRow('보유 종목', (dip.holdings_count || 0) + '종목') + '</div>' +
+      '<div class="muted" style="margin-top:8px;">보유 내역: <span style="color:var(--txt)">' + names + '</span></div>';
+  } else {
+    dipEl.className = 'empty';
+    dipEl.textContent = '상태 없음 (portfolio.json 미발견 — 봇 미가동)';
+  }
+
+  const season = ls.seasonality || {};
+  const seasonEl = document.getElementById('seasonality');
+  const tickers = Object.keys(season);
+  if (tickers.length) {
+    let html = '';
+    for (const t of tickers) {
+      const rep = season[t];
+      const rows = (rep.monthly_stats || []).map(s => {
+        if (s.mean_pct === null || s.mean_pct === undefined)
+          return '<tr><td>' + s.month + '월</td><td colspan="4" class="muted">표본 부족</td></tr>';
+        const cls = s.mean_pct >= 0 ? 'up' : 'dn';
+        return '<tr><td>' + s.month + '월' + (s.significant ? ' <span class="sig">*</span>' : '') + '</td>' +
+          '<td class="' + cls + '">' + s.mean_pct.toFixed(2) + '%</td>' +
+          '<td>' + s.win_rate_pct.toFixed(0) + '%</td><td>' + s.n + '</td><td>' + s.t_stat.toFixed(2) + '</td></tr>';
+      }).join('');
+      html += '<div style="margin-bottom:16px;">' +
+        '<div style="font-size:13px; font-weight:600; margin-bottom:6px;">' + rep.ticker +
+        ' <span class="muted">' + rep.period + ' · 표본 ' + rep.monthly_samples + '개월 · 상위 ' +
+        (rep.best_months || []).join('·') + '월 / 하위 ' + (rep.worst_months || []).join('·') + '월 · Bonferroni 유의: ' +
+        ((rep.significant_months_bonferroni || []).length ? rep.significant_months_bonferroni.join('·') + '월' : '없음') +
+        '</span></div>' +
+        '<table><tr><th>월</th><th>평균</th><th>승률</th><th>표본</th><th>t</th></tr>' + rows + '</table></div>';
+    }
+    seasonEl.className = '';
+    seasonEl.innerHTML = html;
+  }
+
+  const rounds = ls.analysis_rounds || {};
+  const roundsEl = document.getElementById('rounds');
+  const targets = Object.keys(rounds);
+  if (targets.length) {
+    const rows = targets.map(t => {
+      const r = rounds[t], last = r.last || {};
+      return '<tr><td>' + t + '</td><td>' + r.rounds + '</td><td>' + (last.date || last.saved_at || '-') + '</td>' +
+        '<td>' + (last.grade || '-') + '</td><td>' + (last.integrated || '-') + '</td></tr>';
+    }).join('');
+    roundsEl.className = '';
+    roundsEl.innerHTML = '<table><tr><th>대상</th><th>라운드</th><th>최근 평가일</th><th>정보충분도</th><th>통합 평가</th></tr>' + rows + '</table>';
+  }
+}
+async function poll() {
+  try {
+    const res = await fetch('./data/live_status.js?ts=' + Date.now(), { cache: 'no-store' });
+    if (!res.ok) return;
+    const txt = await res.text();
+    const s = txt.indexOf('{'), e = txt.lastIndexOf('}');
+    if (s < 0 || e <= s) return;
+    render(JSON.parse(txt.slice(s, e + 1)));
+  } catch (err) { /* file:// 또는 오프라인 — 무시 */ }
+}
+render(window._liveStatus);
+if (location.protocol.startsWith('http')) setInterval(poll, POLL_MS);
+</script>
+</body>
+</html>

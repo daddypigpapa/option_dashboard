@@ -119,6 +119,30 @@ function showOptionsView(show, market) {
     }
 }
 
+// Toggle the embedded AI Trading Center view (관제 센터 — center/center.html
+// served at /center/: bot live status, seasonality stats, ANALYSIS rounds).
+// Same lazy-iframe pattern as showOptionsView; no style injection needed
+// (the page is our own, already dark-themed).
+function showCenterView(show) {
+    const centerView = document.getElementById('center-view');
+    if (!centerView) return;
+    const mainBlocks = [
+        document.querySelector('.indicators-section'),
+        document.querySelector('.dashboard-workspace'),
+        document.querySelector('.bottom-insight-workspace'),
+    ];
+    if (show) {
+        const iframe = document.getElementById('center-iframe');
+        if (iframe && !iframe.src) {
+            iframe.src = iframe.dataset.src; // lazy first load
+        }
+        centerView.style.display = 'flex';
+        mainBlocks.forEach(el => { if (el) el.style.display = 'none'; });
+    } else {
+        centerView.style.display = 'none';
+    }
+}
+
 // Initialize App
 document.addEventListener('DOMContentLoaded', () => {
     setMarketView(getDefaultMarketView()); // time-based default before first render
@@ -266,6 +290,9 @@ document.addEventListener('DOMContentLoaded', () => {
             // Any menu click leaves the options view unless it IS an options menu
             // (미국ETF / 한국ETF / 한국옵션 share the view, differing by data-market).
             showOptionsView(view === 'options', e.target.getAttribute('data-market'));
+            // 관제 센터 view toggles the same way (after showOptionsView so its
+            // main-block restore never overrides the center view's hide).
+            showCenterView(view === 'center');
             if (view === 'reports') {
                 // Focus AI macro analysis
                 const macroSection = document.querySelector('.macro-ai-section');

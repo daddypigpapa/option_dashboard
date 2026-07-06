@@ -64,6 +64,24 @@ def options_assets(filename):
     return send_from_directory(OPTIONS_DIR, filename)
 
 
+# ------------------------------------------------- AI trading center (관제 센터)
+# Live bot status + seasonality + ANALYSIS round records. The page is static
+# (center/center.html); its data file is published into data/ (gitignored) by
+# dashboard_bridge.py --watch in the ai_trading_center sibling repo. Missing
+# data file -> 404 -> the page shows its own "브리지 미발행" guidance (graceful).
+CENTER_DIR = ROOT / "center"
+
+
+@app.route("/center/")
+def center_index():
+    return send_from_directory(CENTER_DIR, "center.html")
+
+
+@app.route("/center/data/live_status.js")
+def center_live_status():
+    return send_from_directory(ROOT / "data", "live_status.js")
+
+
 # ----------------------------------------------------------------- keys API
 @app.route("/api/keys", methods=["GET"])
 def get_keys():
