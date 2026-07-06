@@ -97,12 +97,22 @@ function showOptionsView(show, market) {
             }, { once: true });
         }
         if (iframe && market) {
-            // Same-origin iframe: click the matching market tab inside it.
+            // Same-origin iframe: click the matching market tab inside it, and
+            // sync the embed's header title to the top-menu label (the vendored
+            // page keeps a static "미국 ETF ..." title regardless of tab — DOM
+            // text is set from the parent so repo files stay pristine).
+            const OPTIONS_TITLES = {
+                us: '📊 미국 ETF 옵션 미결제약정 & 그릭스 분석 대시보드',
+                kr_etf: '📊 한국 ETF 옵션 미결제약정 & 그릭스 분석 대시보드',
+                kr_stock: '📊 한국옵션(KOSPI 개별주) 미결제약정 & 그릭스 분석 대시보드',
+            };
             const applyMarket = () => {
                 try {
                     const btn = iframe.contentDocument
                         ?.querySelector(`.market-tab[data-market="${market}"]`);
                     if (btn) btn.click();
+                    const h1 = iframe.contentDocument?.querySelector('header h1');
+                    if (h1 && OPTIONS_TITLES[market]) h1.textContent = OPTIONS_TITLES[market];
                 } catch (e) { /* iframe not ready — ignore */ }
             };
             if (iframe.contentDocument?.querySelector('.market-tab')) {
