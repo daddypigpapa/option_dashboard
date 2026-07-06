@@ -1,63 +1,76 @@
+"""Central configuration. Reads from environment / .env file.
+
+All other modules import from here so paths and keys live in one place.
+"""
+from __future__ import annotations
+
 import os
-import json
+from pathlib import Path
 
-# 1. 수집 대상 미국 주요 ETF 30선 로드
-# etf_list.json 파일에서 리스트를 동적으로 읽어옵니다.
-CONFIG_DIR = os.path.dirname(os.path.abspath(__file__))
-ETF_LIST_PATH = os.path.join(CONFIG_DIR, "etf_list.json")
+try:
+    from dotenv import load_dotenv
 
-DEFAULT_ETFS = [
-    "SPY", "QQQ", "IWM", "TQQQ", "SOXL", "SQQQ", "TLT", "VOO", "IVV", "HYG",
-    "EEM", "XLK", "XLE", "XLF", "TSLL", "BOIL", "SLV", "GLD", "GDX", "LABU",
-    "UPRO", "SPXS", "UVXY", "SVXY", "KWEB", "FXI", "JNUG", "ARKK", "LQD", "FNGU"
+    load_dotenv()
+except ImportError:  # dotenv is optional at runtime; env vars still work.
+    pass
+
+import keystore
+
+# Keys saved from the frontend dashboard take priority over environment vars.
+_FILE_KEYS = keystore.load_keys()
+
+
+def _key(name: str, default: str = "") -> str:
+    """Resolve a key: keys.json first, then env var, then default."""
+    return (_FILE_KEYS.get(name) or os.getenv(name, "") or default).strip()
+
+
+# ---------------------------------------------------------------- paths
+ROOT_DIR = Path(__file__).resolve().parent
+DATA_DIR = ROOT_DIR / "data"
+RAW_DIR = DATA_DIR / "raw"           # downloaded source data (prices, indicators)
+ANALYSIS_DIR = DATA_DIR / "analysis"  # scored / derived data
+OUTPUT_DIR = DATA_DIR / "output"      # final frontend-facing JSON
+
+for _d in (RAW_DIR, ANALYSIS_DIR, OUTPUT_DIR):
+    _d.mkdir(parents=True, exist_ok=True)
+
+
+# ---------------------------------------------------------------- keys
+FRED_API_KEY = _key("FRED_API_KEY")
+DART_API_KEY = _key("DART_API_KEY")  # opendart.fss.or.kr — Korean disclosures
+# 한국투자증권 OpenAPI (apiportal.koreainvestment.com) — KR market refresh
+KIS_APP_KEY = _key("KIS_APP_KEY")
+KIS_APP_SECRET = _key("KIS_APP_SECRET")
+ANTHROPIC_API_KEY = _key("ANTHROPIC_API_KEY")
+GEMINI_API_KEY = _key("GEMINI_API_KEY")
+
+OPTIONS_FLOW_API_KEY = _key("OPTIONS_FLOW_API_KEY")
+OPTIONS_FLOW_PROVIDER = _key("OPTIONS_FLOW_PROVIDER", "unusualwhales")
+ETF_FLOW_API_KEY = _key("ETF_FLOW_API_KEY")
+ETF_FLOW_PROVIDER = _key("ETF_FLOW_PROVIDER")
+
+
+# ---------------------------------------------------------------- models
+# Latest Claude model id (see claude-api reference). Override via dashboard/env.
+CLAUDE_MODEL = _key("CLAUDE_MODEL", "claude-opus-4-8")
+# Google AI Studio Gemini model.
+GEMINI_MODEL = _key("GEMINI_MODEL", "gemini-2.5-pro")
+
+
+# ---------------------------------------------------------------- tuning
+def _int_or_none(name: str):
+    val = os.getenv(name, "").strip()
+    return int(val) if val.isdigit() else None
+
+
+MAX_TICKERS = _int_or_none("MAX_TICKERS")
+UNIVERSE_OVERRIDE = [
+    t.strip().upper() for t in os.getenv("UNIVERSE_OVERRIDE", "").split(",") if t.strip()
 ]
 
-if os.path.exists(ETF_LIST_PATH):
-    try:
-        with open(ETF_LIST_PATH, "r", encoding="utf-8") as f:
-            TARGET_ETFS = json.load(f)
-    except Exception:
-        TARGET_ETFS = DEFAULT_ETFS
-else:
-    TARGET_ETFS = DEFAULT_ETFS
+# How much history to download for each stock.
+PRICE_HISTORY_PERIOD = os.getenv("PRICE_HISTORY_PERIOD", "1y")
 
-# 1-1. 한국 시장 수집 대상 로드
-# - kr_etf_list.json   : 한국 ETF 거래대금 상위 20 (스냅샷 기준, 수동 편집 가능)
-# - kospi50_list.json  : KOSPI 시가총액 상위 50 (스냅샷 기준, 수동 편집 가능)
-# 형식: [{"code": "005930", "name": "삼성전자"}, ...]
-def _load_json_list(path):
-    if os.path.exists(path):
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            return []
-    return []
-
-KR_ETF_LIST_PATH = os.path.join(CONFIG_DIR, "kr_etf_list.json")
-KOSPI50_LIST_PATH = os.path.join(CONFIG_DIR, "kospi50_list.json")
-KR_ETFS = _load_json_list(KR_ETF_LIST_PATH)      # 한국 ETF 20종
-KOSPI50 = _load_json_list(KOSPI50_LIST_PATH)     # KOSPI 개별주 50종
-
-# 1-2. 한국투자증권(KIS) OpenAPI 설정
-# kis_config.json 에 앱키/시크릿을 넣으면 한국 시장 수집이 활성화됩니다.
-# (kis_config.template.json 참고. 실제 키 파일은 .gitignore 로 제외됨)
-KIS_CONFIG_PATH = os.path.join(CONFIG_DIR, "kis_config.json")
-
-# 2. 수집 범위 기준 설정
-# 잔존 만기일(Days to Expiry, DTE) 기준
-MAX_DTE = 90
-
-# 3. 속도 제한 및 차단 우회 정책 설정
-# API 호출 간 임의 대기 시간 범위 (초 단위)
-DELAY_MIN = 1.5
-DELAY_MAX = 3.0
-
-# 4. 데이터베이스 및 저장소 경로
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DB_PATH = os.path.join(BASE_DIR, "options_data.db")
-DATABASE_URL = f"sqlite:///{DB_PATH}"
-
-# 5. 로깅 설정
-LOG_FORMAT = "%(asctime)s [%(levelname)s] %(message)s"
-LOG_LEVEL = "INFO"
+# Top-N smart money picks to surface for AI briefing.
+TOP_N_PICKS = int(os.getenv("TOP_N_PICKS", "20"))

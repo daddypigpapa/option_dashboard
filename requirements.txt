@@ -1,7 +1,18 @@
-yfinance>=0.2.38
-pandas>=2.0.0
-SQLAlchemy>=2.0.0
-streamlit>=1.30.0
-plotly>=5.18.0
-fastapi>=0.100.0
-uvicorn>=0.22.0
+# Core data
+pandas>=2.2
+numpy>=1.26
+lxml>=5.0            # for pandas.read_html (S&P 500 list)
+
+# Market / macro data sources
+yfinance>=0.2.40    # Yahoo Finance: prices, volume, indices, analyst targets
+requests>=2.32      # FRED REST API + generic HTTP
+
+# Config
+python-dotenv>=1.0
+
+# AI integration
+anthropic>=0.40             # Claude
+google-generativeai>=0.8    # Google AI Studio (Gemini)
+
+# Web Dashboard
+flask>=3.0
